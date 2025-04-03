@@ -1,109 +1,80 @@
-#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include "DHTesp.h"
-#include <Wire.h>
+#include <DHT.h>
 
-// Wi-Fi ve MQTT Ayarları
-const char* ssid = "WiFi_ADINIZ";
-const char* password = "WiFi_SIFRENIZ";
-const char* mqtt_server = "broker.hivemq.com";
-const char* mqtt_topic = "BilSensor/Data"; 
+// 🌬 Klima Üfleme Sensörü (FS300A veya analog giriş)
+#define FAN_SENSOR_PIN A0  
+int fanThreshold = 300;  // Üfleme algılama eşiği
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+// 🌡 Sıcaklık & Nem Sensörü (DHT22)
+#define DHTPIN 2       
+#define DHTTYPE DHT22  
+DHT dht(DHTPIN, DHTTYPE);
 
-// Sensör Pinleri
-#define DHT_PIN  D4  // DHT22 sıcaklık & nem
-#define SENSOR_PIN A0 // Analog sensör
-#define FS3000_I2C_ADDR 0x28 // FS3000 hava akış sensörü adresi
+// 🌡 Sıcaklık ve Nem Alarm Eşik Değerleri
+#define MIN_TEMP 18
+#define MAX_TEMP 24
+#define MIN_HUMIDITY 45
+#define MAX_HUMIDITY 65
 
-DHTesp dhtSensor;
-
-// Zamanlama için değişken
-unsigned long previousMillis = 0;
-const unsigned long interval = 2000;  // 2 saniyede bir veri gönder
-
-void setupWiFi() {
-    Serial.print("Wi-Fi bağlanıyor...");
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println(" Bağlandı!");
-}
-
-void reconnect() {
-    while (!client.connected()) {
-        Serial.print("MQTT bağlanıyor...");
-        if (client.connect("ESP8266_Client")) {
-            Serial.println(" Bağlandı!");
-        } else {
-            Serial.print("Bağlantı hatası: ");
-            Serial.println(client.state());
-            delay(5000);
-        }
-    }
-}
+// ⚡ Hall Effect Sensörü (Elektriksel Akım Tespiti)
+#define HALL_SENSOR_PIN A1   // Hall Effect sensörünün bağlı olduğu pin
+int hallThreshold = 300;  // Hall sensöründen alınan değeri değerlendirme eşiği
 
 void setup() {
-    Serial.begin(115200);
-    dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
-    Wire.begin(D2, D1); // I2C için SDA ve SCL pinleri
-
-    setupWiFi();
-    client.setServer(mqtt_server, 1883);
+  Serial.begin(115200);
+  pinMode(FAN_SENSOR_PIN, INPUT);
+  pinMode(HALL_SENSOR_PIN, INPUT);  // Hall Effect sensörünü giriş olarak ayarla
+  dht.begin();
 }
 
 void loop() {
-    if (!client.connected()) {
-        reconnect();
-    }
-    client.loop();
-
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousMillis >= interval) {
-        previousMillis = currentMillis;
-        sendSensorData();
-    }
+  checkFan();  // 🌬 Klima üflemesini kontrol et
+  checkTemperatureHumidity();  // 🌡 Sıcaklık & Nem kontrol et
+  checkHallSensor();  // ⚡ Hall Effect sensörünü kontrol et
+  delay(3000);  // 3 saniyede bir kontrol
 }
 
-void sendSensorData() {
-    // DHT22 verisi al
-    TempAndHumidity data = dhtSensor.getTempAndHumidity();
-    float temperature = data.temperature;
-    float humidity = data.humidity;
+// 🌬 Klima Üfleme Kontrolü
+void checkFan() {
+  int fanValue = analogRead(FAN_SENSOR_PIN);
+  Serial.print("Klima Üfleme Sensörü Değeri: ");
+  Serial.println(fanValue);
 
-    // FS3000 hava akış verisi al
-    Wire.beginTransmission(FS3000_I2C_ADDR);
-    Wire.write(0x00);
-    Wire.endTransmission(false);
-    Wire.requestFrom(FS3000_I2C_ADDR, 2);
-    float airFlow = 0.0;
-    if (Wire.available() == 2) {
-        uint8_t highByte = Wire.read();
-        uint8_t lowByte = Wire.read();
-        uint16_t rawData = (highByte << 8) | lowByte;
-        airFlow = rawData * 0.00391;
-    }
-
-    // Analog sensörden veri oku
-    int sensorValue = analogRead(SENSOR_PIN);
-    float voltage = (sensorValue / 1023.0) * 3.3;
-    float flowRate = voltage * 5.0;
-
-    // JSON formatında veriyi oluştur
-    StaticJsonDocument<200> jsonDoc;
-    jsonDoc["ID"] = "BilSensor";
-    jsonDoc["Temp"] = temperature;
-    jsonDoc["Hum"] = humidity;
-    jsonDoc["Flow"] = flowRate;
-    
-    char payload[200];
-    serializeJson(jsonDoc, payload);
-
-    Serial.println(payload);
-    client.publish(mqtt_topic, payload);
+  if (fanValue < fanThreshold) {  
+    Serial.println("🚨 UYARI! Klima üflemeyi durdurdu! 🚨");
+  } else {
+    Serial.println("✅ Klima çalışıyor.");
+  }
 }
 
+// 🌡 Sıcaklık ve Nem Kontrolü
+void checkTemperatureHumidity() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  Serial.print("Sıcaklık: "); 
+  Serial.print(temperature);
+  Serial.print(" °C  |  Nem: "); 
+  Serial.print(humidity);
+  Serial.println(" %");
+
+  if (temperature < MIN_TEMP || temperature > MAX_TEMP) {
+    Serial.println("🚨 UYARI! Sıcaklık güvenli aralığın dışında! 🚨");
+  }
+
+  if (humidity < MIN_HUMIDITY || humidity > MAX_HUMIDITY) {
+    Serial.println("🚨 UYARI! Nem güvenli aralığın dışında! 🚨");
+  }
+}
+
+// ⚡ Hall Effect Sensörü Kontrolü (Elektriksel Akım Tespiti)
+void checkHallSensor() {
+  int hallValue = analogRead(HALL_SENSOR_PIN);  // Hall Effect sensöründen veri oku
+  Serial.print("Hall Effect Sensörü Değeri: ");
+  Serial.println(hallValue);
+
+  if (hallValue < hallThreshold) {  // Eşik değerin altındaysa, elektrik yok ya da düşük akım
+    Serial.println("🚨 UYARI! Elektriksel akımda bir sorun tespit edildi! 🚨");
+  } else {
+    Serial.println("✅ Elektriksel akım normal.");
+  }
+}
