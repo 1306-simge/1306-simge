@@ -27,7 +27,7 @@ void setup() {
 }
 
 void loop() {
-  checkFan();  // 🌬 Klima üflemesini kontrol et
+  checkFan();  // Klima üflemesini kontrol et
   checkTemperatureHumidity();  //  Sıcaklık & Nem kontrol et
   checkHallSensor();  //  Hall Effect sensörünü kontrol et
   delay(3000);  // 3 saniyede bir kontrol
