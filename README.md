@@ -33,7 +33,7 @@ void loop() {
   delay(3000);  // 3 saniyede bir kontrol
 }
 
-// 🌬 Klima Üfleme Kontrolü
+//  Klima Üfleme Kontrolü
 void checkFan() {
   int fanValue = analogRead(FAN_SENSOR_PIN);
   Serial.print("Klima Üfleme Sensörü Değeri: ");
